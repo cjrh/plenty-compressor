@@ -34,15 +34,16 @@ an ABI and signal regression harness, not a DAW compatibility certification.
 ## CLAP build and test
 
 CLAP currently requires **Linux GNU x86_64**, `libatomic` development/linker
-files, a C compiler for tests, and the Plenty integration branch
-`codex/clap-abi-integration` (local Plenty PR #1167, commit `eaf3827b`).
-The ordinary released compiler and the earlier LV2 compiler are insufficient.
-Set `PLENTY` to a compiler built from that integration branch:
+files, a C compiler for tests, and a Plenty compiler with the CLAP interop
+features. Plenty 0.8.24 was used to build and test this version. With that
+compiler on `PATH`, run:
 
 ```sh
-PLENTY=/path/to/integration/target/debug/plenty just check
-PLENTY=/path/to/integration/target/debug/plenty just test-all
+just check
+just test-all
 ```
+
+Set `PLENTY` to the compiler executable if it is not on `PATH`.
 
 `just build-clap` produces `build/plenty-compressor.clap`. Copy it into your
 host's CLAP search directory, or add this build directory to `CLAP_PATH`.
