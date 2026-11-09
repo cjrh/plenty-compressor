@@ -2,20 +2,7 @@ import std.math as math
 import abi
 from abi import Pointer
 
-# Linked stereo peak detector. State is supplied by the caller and starts at 0.
-# attack/release are one-pole coefficients in [0, 1]; threshold is linear.
-def gain(left: f64, right: f64, envelope: &mut f64, threshold: f64, ratio: f64, attack: f64, release: f64) -> f64:
-    peak = math.max(math.abs_float(left), math.abs_float(right))
-    coeff = attack if peak > *envelope else release
-    *envelope = coeff * *envelope + (1.0 - coeff) * peak
-    if *envelope <= threshold or *envelope <= 0.0:
-        return 1.0
-    # Above threshold, output level grows at 1/ratio of the input in dB.
-    match math.pow(*envelope / threshold, (1.0 / ratio) - 1.0):
-        case Ok(value):
-            value
-        case Err(_):
-            1.0
+import dsp
 
 
 @thread_safe
@@ -75,7 +62,7 @@ export def run(state: Pointer, count: u32) -> () = "compressor_run":
         r_raw = f64(abi.read_f32(right, offset))
         l = l_raw if math.isfinite(l_raw) else 0.0
         r = r_raw if math.isfinite(r_raw) else 0.0
-        g = gain(l, r, &mut envelope, threshold, ratio, attack, release)
+        g = dsp.gain(l, r, &mut envelope, threshold, ratio, attack, release)
         # Both inputs were loaded before either store: exact input/output
         # aliases and crossed stereo buffers preserve the sample pair.
         abi.write_f32(output_left, offset, f32(l * g))

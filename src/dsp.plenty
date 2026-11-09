@@ -1,0 +1,17 @@
+import std.math as math
+
+# Linked stereo peak detector. State is supplied by the caller and starts at 0.
+# attack/release are one-pole coefficients in [0, 1]; threshold is linear.
+pub def gain(left: f64, right: f64, envelope: &mut f64, threshold: f64, ratio: f64, attack: f64, release: f64) -> f64:
+    peak = math.max(math.abs_float(left), math.abs_float(right))
+    coeff = attack if peak > *envelope else release
+    *envelope = coeff * *envelope + (1.0 - coeff) * peak
+    if *envelope <= threshold or *envelope <= 0.0:
+        return 1.0
+    # Above threshold, output level grows at 1/ratio of the input in dB.
+    match math.pow(*envelope / threshold, (1.0 / ratio) - 1.0):
+        case Ok(value):
+            value
+        case Err(_):
+            1.0
+

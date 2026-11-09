@@ -1,0 +1,254 @@
+# Trusted CLAP 1.2.10 Linux GNU x86_64 ABI. Layouts checked by native tests.
+# Host pointers are borrowed for the callback; no Plenty reference aliases them.
+@thread_movable
+pub opaque Pointer
+
+@thread_safe
+pub extern def read_Pointer(p: Pointer, offset: u64) -> Pointer = intrinsic "load"
+
+@thread_safe
+pub extern def write_Pointer(p: Pointer, offset: u64, value: Pointer) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def read_u8(p: Pointer, offset: u64) -> u8 = intrinsic "load"
+
+@thread_safe
+pub extern def write_u8(p: Pointer, offset: u64, value: u8) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def read_u16(p: Pointer, offset: u64) -> u16 = intrinsic "load"
+
+@thread_safe
+pub extern def write_u16(p: Pointer, offset: u64, value: u16) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def read_i16(p: Pointer, offset: u64) -> i16 = intrinsic "load"
+
+@thread_safe
+pub extern def write_i16(p: Pointer, offset: u64, value: i16) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def read_u32(p: Pointer, offset: u64) -> u32 = intrinsic "load"
+
+@thread_safe
+pub extern def write_u32(p: Pointer, offset: u64, value: u32) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def read_i32(p: Pointer, offset: u64) -> i32 = intrinsic "load"
+
+@thread_safe
+pub extern def write_i32(p: Pointer, offset: u64, value: i32) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def read_u64(p: Pointer, offset: u64) -> u64 = intrinsic "load"
+
+@thread_safe
+pub extern def write_u64(p: Pointer, offset: u64, value: u64) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def read_f32(p: Pointer, offset: u64) -> f32 = intrinsic "load"
+
+@thread_safe
+pub extern def write_f32(p: Pointer, offset: u64, value: f32) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def read_f64(p: Pointer, offset: u64) -> f64 = intrinsic "load"
+
+@thread_safe
+pub extern def write_f64(p: Pointer, offset: u64, value: f64) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def offset(p: Pointer, offset: u64) -> Pointer = intrinsic "offset"
+
+@thread_safe
+pub extern def allocate(count: u64, size: u64) -> Pointer = "calloc"
+
+@thread_safe
+pub extern def free(p: Pointer) -> () = "free"
+
+@thread_safe
+pub extern def compare(a: Pointer, b: Pointer) -> i32 = "strcmp"
+
+@thread_safe
+pub extern def copy_bytes(to: Pointer, source: Pointer, size: u64) -> Pointer = "memcpy"
+
+# GCC generic libatomic ABI: leading size, address, scalar buffer, memory order.
+# Only aligned 8-byte slots, checked lock-free before publishing each instance.
+@thread_safe
+pub extern def atomic_read(size: u64, p: Pointer, output: &mut f64, order: i32) -> () = "__atomic_load"
+
+@thread_safe
+pub extern def atomic_write(size: u64, p: Pointer, value: &f64, order: i32) -> () = "__atomic_store"
+
+@thread_safe
+pub extern def lock_free(size: u64, p: Pointer) -> bool = "__atomic_is_lock_free"
+
+# Function pointers come from resident host tables, with the exact CLAP
+# signatures below. Invoke only during the corresponding host callback scope.
+@host_callback
+pub extern def event_count(function: Pointer, list: Pointer) -> u32 = function
+
+@host_callback
+pub extern def event_get(function: Pointer, list: Pointer, index: u32) -> Pointer = function
+
+@host_callback
+pub extern def host_extension(function: Pointer, host: Pointer, id: Pointer) -> Pointer = function
+
+@host_callback
+pub extern def rescan(function: Pointer, host: Pointer, flags: u32) -> () = function
+
+@host_callback
+pub extern def stream(function: Pointer, stream: Pointer, buffer: Pointer, size: u64) -> i64 = function
+
+@thread_safe
+pub extern def id() -> Pointer = object "pc_clap_id"(size=22, align=1):
+    0: bytes = b"org.plenty.compressor\0"
+
+@thread_safe
+pub extern def name() -> Pointer = object "pc_clap_name"(size=18, align=1):
+    0: bytes = b"Plenty Compressor\0"
+
+@thread_safe
+pub extern def vendor() -> Pointer = object "pc_clap_vendor"(size=7, align=1):
+    0: bytes = b"Plenty\0"
+
+@thread_safe
+pub extern def url() -> Pointer = object "pc_clap_url"(size=38, align=1):
+    0: bytes = b"https://example.org/plenty-compressor\0"
+
+@thread_safe
+pub extern def version() -> Pointer = object "pc_clap_version"(size=6, align=1):
+    0: bytes = b"0.1.0\0"
+
+@thread_safe
+pub extern def description() -> Pointer = object "pc_clap_description"(size=43, align=1):
+    0: bytes = b"Linked stereo compressor written in Plenty\0"
+
+@thread_safe
+pub extern def effect() -> Pointer = object "pc_clap_effect"(size=13, align=1):
+    0: bytes = b"audio-effect\0"
+
+@thread_safe
+pub extern def compressor() -> Pointer = object "pc_clap_compressor"(size=11, align=1):
+    0: bytes = b"compressor\0"
+
+@thread_safe
+pub extern def stereo() -> Pointer = object "pc_clap_stereo"(size=7, align=1):
+    0: bytes = b"stereo\0"
+
+@thread_safe
+pub extern def empty() -> Pointer = object "pc_clap_empty"(size=1, align=1):
+    0: bytes = b"\0"
+
+@thread_safe
+pub extern def threshold() -> Pointer = object "pc_clap_threshold"(size=15, align=1):
+    0: bytes = b"Threshold (dB)\0"
+
+@thread_safe
+pub extern def ratio() -> Pointer = object "pc_clap_ratio"(size=6, align=1):
+    0: bytes = b"Ratio\0"
+
+@thread_safe
+pub extern def attack() -> Pointer = object "pc_clap_attack"(size=12, align=1):
+    0: bytes = b"Attack (ms)\0"
+
+@thread_safe
+pub extern def release() -> Pointer = object "pc_clap_release"(size=13, align=1):
+    0: bytes = b"Release (ms)\0"
+
+@thread_safe
+pub extern def factory_id() -> Pointer = static "clap.plugin-factory"
+
+@thread_safe
+pub extern def params_id() -> Pointer = static "clap.params"
+
+@thread_safe
+pub extern def audio_id() -> Pointer = static "clap.audio-ports"
+
+@thread_safe
+pub extern def state_id() -> Pointer = static "clap.state"
+
+@thread_safe
+pub extern def features() -> Pointer = object "pc_clap_features"(size=32, align=8):
+    0: object = "pc_clap_effect"
+    8: object = "pc_clap_compressor"
+    16: object = "pc_clap_stereo"
+
+@thread_safe
+pub extern def descriptor() -> Pointer = object "pc_clap_descriptor"(size=88, align=8):
+    0: u32 = 1
+    4: u32 = 2
+    8: u32 = 10
+    16: object = "pc_clap_id"
+    24: object = "pc_clap_name"
+    32: object = "pc_clap_vendor"
+    40: object = "pc_clap_url"
+    48: object = "pc_clap_empty"
+    56: object = "pc_clap_empty"
+    64: object = "pc_clap_version"
+    72: object = "pc_clap_description"
+    80: object = "pc_clap_features"
+
+@thread_safe
+pub extern def factory() -> Pointer = object "pc_clap_factory"(size=24, align=8):
+    0: callback = "compressor_clap_count"
+    8: callback = "compressor_clap_descriptor"
+    16: callback = "compressor_clap_create"
+
+@thread_safe
+pub extern def params() -> Pointer = object "pc_clap_params"(size=48, align=8):
+    0: callback = "compressor_clap_param_count"
+    8: callback = "compressor_clap_param_info"
+    16: callback = "compressor_clap_param_value"
+    24: callback = "compressor_clap_value_text"
+    32: callback = "compressor_clap_text_value"
+    40: callback = "compressor_clap_flush"
+
+@thread_safe
+pub extern def audio() -> Pointer = object "pc_clap_audio"(size=16, align=8):
+    0: callback = "compressor_clap_audio_count"
+    8: callback = "compressor_clap_audio_info"
+
+@thread_safe
+pub extern def state() -> Pointer = object "pc_clap_state"(size=16, align=8):
+    0: callback = "compressor_clap_save"
+    8: callback = "compressor_clap_load"
+
+@thread_safe
+pub extern def entry() -> Pointer = object "clap_entry"(size=40, align=8):
+    0: u32 = 1
+    4: u32 = 2
+    8: u32 = 10
+    16: callback = "compressor_clap_entry_init"
+    24: callback = "compressor_clap_entry_deinit"
+    32: callback = "compressor_clap_get_factory"
+
+@thread_safe
+pub extern def init_address() -> Pointer = address "compressor_clap_init"
+
+@thread_safe
+pub extern def destroy_address() -> Pointer = address "compressor_clap_destroy"
+
+@thread_safe
+pub extern def activate_address() -> Pointer = address "compressor_clap_activate"
+
+@thread_safe
+pub extern def deactivate_address() -> Pointer = address "compressor_clap_deactivate"
+
+@thread_safe
+pub extern def start_address() -> Pointer = address "compressor_clap_start"
+
+@thread_safe
+pub extern def stop_address() -> Pointer = address "compressor_clap_stop"
+
+@thread_safe
+pub extern def reset_address() -> Pointer = address "compressor_clap_reset"
+
+@thread_safe
+pub extern def process_address() -> Pointer = address "compressor_clap_process"
+
+@thread_safe
+pub extern def extension_address() -> Pointer = address "compressor_clap_extension"
+
+@thread_safe
+pub extern def on_main_address() -> Pointer = address "compressor_clap_on_main"

@@ -1,0 +1,464 @@
+import std.math as math
+import clap_abi as abi
+from clap_abi import Pointer
+import dsp
+
+# Instance: native plugin table [0,96), rate96, envelope104, atomic controls
+# [112,144), initialized144, active148, processing152, max_frames156,
+# host160, host params168. Host lifecycle ordering protects non-atomic fields.
+def low(id: u32) -> f64:
+    match id:
+        case 0u32:
+            -60.0
+        case 1u32:
+            1.0
+        case 2u32:
+            0.1
+        case _:
+            1.0
+
+def high(id: u32) -> f64:
+    match id:
+        case 0u32:
+            0.0
+        case 1u32:
+            20.0
+        case 2u32:
+            200.0
+        case _:
+            2000.0
+
+def initial(id: u32) -> f64:
+    match id:
+        case 0u32:
+            -18.0
+        case 1u32:
+            4.0
+        case 2u32:
+            10.0
+        case _:
+            100.0
+
+def control(p: Pointer, id: u32) -> f64:
+    mut value = 0.0
+    unchecked:
+        abi.atomic_read(8u64, abi.offset(p, 112u64 + u64(id) * 8u64), &mut value, 5i32)
+    value
+
+def set_control(p: Pointer, id: u32, value: f64) -> ():
+    unchecked:
+        abi.atomic_write(8u64, abi.offset(p, 112u64 + u64(id) * 8u64), &value, 5i32)
+
+def same(a: Pointer, b: Pointer) -> bool:
+    not a.is_null() and abi.compare(a, b) == 0i32
+
+@thread_safe
+export def entry_init(path: Pointer) -> bool = "compressor_clap_entry_init":
+    not path.is_null()
+
+@thread_safe
+export def entry_deinit() -> () = "compressor_clap_entry_deinit":
+    pass
+
+@thread_safe
+export def get_factory(id: Pointer) -> Pointer = "compressor_clap_get_factory":
+    abi.factory() if same(id, abi.factory_id()) else Pointer.null()
+
+@thread_safe
+export def count(factory: Pointer) -> u32 = "compressor_clap_count":
+    1u32
+
+@thread_safe
+export def descriptor(factory: Pointer, index: u32) -> Pointer = "compressor_clap_descriptor":
+    abi.descriptor() if index == 0u32 else Pointer.null()
+
+@thread_safe
+export def create(factory: Pointer, host: Pointer, id: Pointer) -> Pointer = "compressor_clap_create":
+    if host.is_null() or not same(id, abi.id()):
+        return Pointer.null()
+    if abi.read_u32(host, 0u64) < 1u32:
+        return Pointer.null()
+    p = abi.allocate(1u64, 176u64)
+    if p.is_null():
+        return p
+    if not abi.lock_free(8u64, abi.offset(p, 112u64)):
+        abi.free(p)
+        return Pointer.null()
+    abi.write_Pointer(p, 0u64, abi.descriptor())
+    abi.write_Pointer(p, 8u64, p)
+    abi.write_Pointer(p, 16u64, abi.init_address())
+    abi.write_Pointer(p, 24u64, abi.destroy_address())
+    abi.write_Pointer(p, 32u64, abi.activate_address())
+    abi.write_Pointer(p, 40u64, abi.deactivate_address())
+    abi.write_Pointer(p, 48u64, abi.start_address())
+    abi.write_Pointer(p, 56u64, abi.stop_address())
+    abi.write_Pointer(p, 64u64, abi.reset_address())
+    abi.write_Pointer(p, 72u64, abi.process_address())
+    abi.write_Pointer(p, 80u64, abi.extension_address())
+    abi.write_Pointer(p, 88u64, abi.on_main_address())
+    abi.write_Pointer(p, 160u64, host)
+    for id in range(4):
+        set_control(p, u32(id), initial(u32(id)))
+    p
+
+@thread_safe
+export def init(p: Pointer) -> bool = "compressor_clap_init":
+    if abi.read_u32(p, 144u64) != 0u32:
+        return False
+    host = abi.read_Pointer(p, 160u64)
+    fn = abi.read_Pointer(host, 56u64)
+    if not fn.is_null():
+        abi.write_Pointer(p, 168u64, abi.host_extension(fn, host, abi.params_id()))
+    abi.write_u32(p, 144u64, 1u32)
+    True
+
+@thread_safe
+export def destroy(p: Pointer) -> () = "compressor_clap_destroy":
+    abi.free(p)
+
+@thread_safe
+export def activate(p: Pointer, rate: f64, minimum: u32, maximum: u32) -> bool = "compressor_clap_activate":
+    if abi.read_u32(p, 144u64) == 0u32 or abi.read_u32(p, 148u64) != 0u32:
+        return False
+    if not math.isfinite(rate) or rate <= 0.0 or minimum == 0u32 or maximum < minimum or maximum > 2147483647u32:
+        return False
+    abi.write_f64(p, 96u64, rate)
+    abi.write_f64(p, 104u64, 0.0)
+    abi.write_u32(p, 156u64, maximum)
+    abi.write_u32(p, 148u64, 1u32)
+    True
+
+@thread_safe
+export def deactivate(p: Pointer) -> () = "compressor_clap_deactivate":
+    abi.write_u32(p, 148u64, 0u32)
+    abi.write_u32(p, 152u64, 0u32)
+
+@thread_safe
+export def start(p: Pointer) -> bool = "compressor_clap_start":
+    if abi.read_u32(p, 148u64) == 0u32 or abi.read_u32(p, 152u64) != 0u32:
+        return False
+    abi.write_u32(p, 152u64, 1u32)
+    True
+
+@thread_safe
+export def stop(p: Pointer) -> () = "compressor_clap_stop":
+    abi.write_u32(p, 152u64, 0u32)
+
+@thread_safe
+export def reset(p: Pointer) -> () = "compressor_clap_reset":
+    abi.write_f64(p, 104u64, 0.0)
+
+@thread_safe
+export def on_main(p: Pointer) -> () = "compressor_clap_on_main":
+    pass
+
+@thread_safe
+export def extension(p: Pointer, id: Pointer) -> Pointer = "compressor_clap_extension":
+    if same(id, abi.params_id()):
+        return abi.params()
+    if same(id, abi.audio_id()):
+        return abi.audio()
+    if same(id, abi.state_id()):
+        return abi.state()
+    Pointer.null()
+
+@thread_safe
+export def audio_count(p: Pointer, input: bool) -> u32 = "compressor_clap_audio_count":
+    1u32
+
+@thread_safe
+export def audio_info(p: Pointer, index: u32, input: bool, info: Pointer) -> bool = "compressor_clap_audio_info":
+    if index != 0u32 or info.is_null():
+        return False
+    abi.write_u32(info, 0u64, 0u32)
+    abi.copy_bytes(abi.offset(info, 4u64), abi.name(), 18u64)
+    abi.write_u32(info, 260u64, 9u32)
+    abi.write_u32(info, 264u64, 2u32)
+    abi.write_Pointer(info, 272u64, abi.stereo())
+    abi.write_u32(info, 280u64, 0u32)
+    True
+
+@thread_safe
+export def param_count(p: Pointer) -> u32 = "compressor_clap_param_count":
+    4u32
+
+@thread_safe
+export def param_info(p: Pointer, id: u32, info: Pointer) -> bool = "compressor_clap_param_info":
+    if id >= 4u32 or info.is_null():
+        return False
+    abi.write_u32(info, 0u64, id)
+    abi.write_u32(info, 4u64, 32800u32)
+    abi.write_Pointer(info, 8u64, Pointer.null())
+    abi.write_u8(info, 272u64, 0u8)
+    name = match id:
+        case 0u32:
+            abi.threshold()
+        case 1u32:
+            abi.ratio()
+        case 2u32:
+            abi.attack()
+        case _:
+            abi.release()
+    mut i = 0u64
+    while i < 255u64:
+        byte = abi.read_u8(name, i)
+        unchecked:
+            abi.write_u8(info, 16u64 + i, byte)
+        if byte == 0u8:
+            break
+        unchecked:
+            i += 1u64
+    abi.write_f64(info, 1296u64, low(id))
+    abi.write_f64(info, 1304u64, high(id))
+    abi.write_f64(info, 1312u64, initial(id))
+    True
+
+@thread_safe
+export def param_value(p: Pointer, id: u32, output: Pointer) -> bool = "compressor_clap_param_value":
+    if id >= 4u32 or output.is_null():
+        return False
+    abi.write_f64(output, 0u64, control(p, id))
+    True
+
+# Bounded decimal formatting/parsing; names carry the units. No locale dependency.
+@thread_safe
+export def value_text(p: Pointer, id: u32, value: f64, text: Pointer, capacity: u32) -> bool = "compressor_clap_value_text":
+    if id >= 4u32 or text.is_null() or not math.isfinite(value):
+        return False
+    if value < low(id) or value > high(id):
+        return False
+    mut needed = 6u32
+    magnitude = math.abs_float(value) + 0.0005
+    if magnitude >= 1000.0:
+        needed = 9u32
+    elif magnitude >= 100.0:
+        needed = 8u32
+    elif magnitude >= 10.0:
+        needed = 7u32
+    if value < 0.0:
+        unchecked:
+            needed += 1u32
+    if capacity < needed:
+        return False
+    mut at = 0u64
+    if value < 0.0:
+        abi.write_u8(text, at, 45u8)
+        at = 1u64
+    mut remaining = magnitude
+    mut divisor = 1000.0
+    mut started = False
+    for digit in range(4):
+        mut n = 0u8
+        while remaining >= divisor and n < 9u8:
+            remaining -= divisor
+            unchecked:
+                n += 1u8
+        if n != 0u8 or started or digit == 3:
+            unchecked:
+                abi.write_u8(text, at, 48u8 + n)
+                at += 1u64
+            started = True
+        divisor /= 10.0
+    abi.write_u8(text, at, 46u8)
+    unchecked:
+        at += 1u64
+    for digit in range(3):
+        remaining *= 10.0
+        mut n = 0u8
+        while remaining >= 1.0 and n < 9u8:
+            remaining -= 1.0
+            unchecked:
+                n += 1u8
+        unchecked:
+            abi.write_u8(text, at, 48u8 + n)
+            at += 1u64
+    abi.write_u8(text, at, 0u8)
+    True
+
+@thread_safe
+export def text_value(p: Pointer, id: u32, text: Pointer, output: Pointer) -> bool = "compressor_clap_text_value":
+    if id >= 4u32 or text.is_null() or output.is_null():
+        return False
+    mut value = 0.0
+    mut scale = 1.0
+    mut decimal = False
+    mut negative = False
+    mut digits = False
+    for i in range(64):
+        c = abi.read_u8(text, u64(i))
+        if c == 0u8:
+            if negative:
+                value = -value
+            if not digits or value < low(id) or value > high(id):
+                return False
+            abi.write_f64(output, 0u64, value)
+            return True
+        if i == 0 and c == 45u8:
+            negative = True
+        elif c == 46u8 and not decimal:
+            decimal = True
+        elif c >= 48u8 and c <= 57u8:
+            digit = unchecked:
+                f64(c - 48u8)
+            if decimal:
+                scale *= 0.1
+                value += digit * scale
+            else:
+                value = value * 10.0 + digit
+            digits = True
+        else:
+            return False
+    False
+
+# Unknown event kinds and note-targeted parameter values do not affect globals.
+def apply_event(p: Pointer, e: Pointer) -> ():
+    if e.is_null() or abi.read_u32(e, 0u64) < 56u32:
+        return
+    if abi.read_u16(e, 8u64) != 0u16 or abi.read_u16(e, 10u64) != 5u16:
+        return
+    if abi.read_i32(e, 32u64) != -1i32 or abi.read_i16(e, 36u64) != -1i16 or abi.read_i16(e, 38u64) != -1i16 or abi.read_i16(e, 40u64) != -1i16:
+        return
+    id = abi.read_u32(e, 16u64)
+    value = abi.read_f64(e, 48u64)
+    if id < 4u32 and math.isfinite(value):
+        set_control(p, id, math.max(low(id), math.min(high(id), value)))
+
+@thread_safe
+export def flush(p: Pointer, input: Pointer, output: Pointer) -> () = "compressor_clap_flush":
+    if input.is_null():
+        return
+    size_fn = abi.read_Pointer(input, 8u64)
+    get_fn = abi.read_Pointer(input, 16u64)
+    if size_fn.is_null() or get_fn.is_null():
+        return
+    count = abi.event_count(size_fn, input)
+    for i in range(i64(count)):
+        apply_event(p, abi.event_get(get_fn, input, u32(i)))
+
+def segment(p: Pointer, input: Pointer, output: Pointer, begin: u32, end: u32) -> ():
+    left = abi.read_Pointer(input, 0u64)
+    right = abi.read_Pointer(input, 8u64)
+    out_left = abi.read_Pointer(output, 0u64)
+    out_right = abi.read_Pointer(output, 8u64)
+    rate = abi.read_f64(p, 96u64)
+    threshold = math.pow(10.0, control(p, 0u32) / 20.0).unwrap_or(1.0)
+    ratio = control(p, 1u32)
+    attack = math.exp(-1.0 / (0.001 * rate * control(p, 2u32))).unwrap_or(0.0)
+    release = math.exp(-1.0 / (0.001 * rate * control(p, 3u32))).unwrap_or(0.0)
+    mut envelope = abi.read_f64(p, 104u64)
+    for i in range(i64(begin), i64(end)):
+        offset = unchecked:
+            u64(i) * 4u64
+        l_raw = f64(abi.read_f32(left, offset))
+        r_raw = f64(abi.read_f32(right, offset))
+        l = l_raw if math.isfinite(l_raw) else 0.0
+        r = r_raw if math.isfinite(r_raw) else 0.0
+        gain = dsp.gain(l, r, &mut envelope, threshold, ratio, attack, release)
+        abi.write_f32(out_left, offset, f32(l * gain))
+        abi.write_f32(out_right, offset, f32(r * gain))
+    abi.write_f64(p, 104u64, envelope)
+
+@thread_safe
+export def process(p: Pointer, process: Pointer) -> i32 = "compressor_clap_process":
+    if process.is_null() or abi.read_u32(p, 152u64) == 0u32:
+        return 0i32
+    frames = abi.read_u32(process, 8u64)
+    if frames > abi.read_u32(p, 156u64):
+        return 0i32
+    if frames == 0u32:
+        flush(p, abi.read_Pointer(process, 48u64), Pointer.null())
+        return 1i32
+    if abi.read_u32(process, 40u64) != 1u32 or abi.read_u32(process, 44u64) != 1u32:
+        return 0i32
+    input = abi.read_Pointer(process, 24u64)
+    output = abi.read_Pointer(process, 32u64)
+    if input.is_null() or output.is_null():
+        return 0i32
+    if abi.read_u32(input, 16u64) != 2u32 or abi.read_u32(output, 16u64) != 2u32:
+        return 0i32
+    ins = abi.read_Pointer(input, 0u64)
+    outs = abi.read_Pointer(output, 0u64)
+    if ins.is_null() or outs.is_null():
+        return 0i32
+    if abi.read_Pointer(ins, 0u64).is_null() or abi.read_Pointer(ins, 8u64).is_null() or abi.read_Pointer(outs, 0u64).is_null() or abi.read_Pointer(outs, 8u64).is_null():
+        return 0i32
+    mut cursor = 0u32
+    events = abi.read_Pointer(process, 48u64)
+    if not events.is_null():
+        size_fn = abi.read_Pointer(events, 8u64)
+        get_fn = abi.read_Pointer(events, 16u64)
+        if not size_fn.is_null() and not get_fn.is_null():
+            count = abi.event_count(size_fn, events)
+            for i in range(i64(count)):
+                event = abi.event_get(get_fn, events, u32(i))
+                if not event.is_null() and abi.read_u32(event, 0u64) >= 16u32:
+                    time = abi.read_u32(event, 4u64)
+                    if time >= cursor and time < frames:
+                        if time > cursor:
+                            segment(p, ins, outs, cursor, time)
+                        apply_event(p, event)
+                        cursor = time
+    segment(p, ins, outs, cursor, frames)
+    abi.write_u64(output, 24u64, 0u64)
+    1i32
+
+# Fixed little-endian state: magic PCLP, version1, four IEEE754 doubles.
+# Stage complete reads before publication. Controls are independent atomics;
+# concurrent automation can interleave a save or successful preset load.
+def transfer(stream: Pointer, buffer: Pointer) -> bool:
+    if stream.is_null():
+        return False
+    fn = abi.read_Pointer(stream, 8u64)
+    if fn.is_null():
+        return False
+    mut position = 0u64
+    while position < 40u64:
+        remaining = unchecked:
+            40u64 - position
+        count = abi.stream(fn, stream, abi.offset(buffer, position), remaining)
+        if count <= 0 or u64(count) > remaining:
+            return False
+        unchecked:
+            position += u64(count)
+    True
+
+@thread_safe
+export def save(p: Pointer, stream: Pointer) -> bool = "compressor_clap_save":
+    buffer = abi.allocate(1u64, 40u64)
+    if buffer.is_null():
+        return False
+    abi.write_u32(buffer, 0u64, 1347175248u32)
+    abi.write_u32(buffer, 4u64, 1u32)
+    for i in range(4):
+        unchecked:
+            abi.write_f64(buffer, 8u64 + u64(i) * 8u64, control(p, u32(i)))
+    ok = transfer(stream, buffer)
+    abi.free(buffer)
+    ok
+
+@thread_safe
+export def load(p: Pointer, stream: Pointer) -> bool = "compressor_clap_load":
+    buffer = abi.allocate(1u64, 40u64)
+    if buffer.is_null():
+        return False
+    mut ok = transfer(stream, buffer)
+    if ok:
+        ok = abi.read_u32(buffer, 0u64) == 1347175248u32 and abi.read_u32(buffer, 4u64) == 1u32
+    if ok:
+        for i in range(4):
+            value = unchecked:
+                abi.read_f64(buffer, 8u64 + u64(i) * 8u64)
+            if not math.isfinite(value) or value < low(u32(i)) or value > high(u32(i)):
+                ok = False
+    if ok:
+        for i in range(4):
+            unchecked:
+                set_control(p, u32(i), abi.read_f64(buffer, 8u64 + u64(i) * 8u64))
+    abi.free(buffer)
+    if ok:
+        params = abi.read_Pointer(p, 168u64)
+        if not params.is_null():
+            fn = abi.read_Pointer(params, 0u64)
+            if not fn.is_null():
+                abi.rescan(fn, abi.read_Pointer(p, 160u64), 1u32)
+    ok

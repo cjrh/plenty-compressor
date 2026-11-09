@@ -7,6 +7,7 @@ default:
 
 check:
     "{{plenty}}" --check-module src/lib.plenty
+    "{{plenty}}" --check-module src/clap.plenty
 
 build:
     mkdir -p build/compressor.lv2
@@ -25,3 +26,14 @@ daw program *args: build
 
 clean:
     rm -rf build target
+
+# Linux GNU x86_64; requires the CLAP interop compiler and libatomic.
+build-clap:
+    mkdir -p build
+    "{{plenty}}" --shared-library src/clap.plenty --library-name compressor --unloadable-library --link-arg -latomic -o build/plenty-compressor.clap
+
+test-clap: build-clap
+    cc -std=c11 -O2 -Wall -Wextra -Werror -Itests/vendor/clap/include tests/clap_host.c -o build/clap-host -ldl -lpthread -lm
+    ./build/clap-host "$PWD/build/plenty-compressor.clap"
+
+test-all: test test-clap
