@@ -3,6 +3,6 @@ manifest-version = 1
 [package]
 name = "compressor"
 version = "0.1.0"
-plenty-version = "0.8.21"
+plenty-version = "0.8.22"
 
 [dependencies]

@@ -1,8 +1,10 @@
 import std.math as math
+import abi
+from abi import Pointer
 
 # Linked stereo peak detector. State is supplied by the caller and starts at 0.
 # attack/release are one-pole coefficients in [0, 1]; threshold is linear.
-pub export def gain(left: f64, right: f64, envelope: &mut f64, threshold: f64, ratio: f64, attack: f64, release: f64) -> f64 = "compressor_gain":
+def gain(left: f64, right: f64, envelope: &mut f64, threshold: f64, ratio: f64, attack: f64, release: f64) -> f64:
     peak = math.max(math.abs_float(left), math.abs_float(right))
     coeff = attack if peak > *envelope else release
     *envelope = coeff * *envelope + (1.0 - coeff) * peak
@@ -14,3 +16,96 @@ pub export def gain(left: f64, right: f64, envelope: &mut f64, threshold: f64, r
             value
         case Err(_):
             1.0
+
+
+@thread_safe
+export def instantiate(descriptor: Pointer, rate: f64, path: Pointer, features: Pointer) -> Pointer = "compressor_instantiate":
+    if not math.isfinite(rate) or rate <= 0.0:
+        return Pointer.null()
+    state = abi.allocate(1u64, abi.INSTANCE_BYTES)
+    if not state.is_null():
+        abi.write_f64(state, abi.RATE, rate)
+    state
+
+
+@thread_safe
+export def connect(state: Pointer, port: u32, data: Pointer) -> () = "compressor_connect":
+    if port < 8u32:
+        # port is bounded above by 7; the slot lies in the 64-byte port table.
+        unchecked:
+            abi.write_pointer(state, u64(port) * 8u64, data)
+
+
+@thread_safe
+export def activate(state: Pointer) -> () = "compressor_activate":
+    abi.write_f64(state, abi.ENVELOPE, 0.0)
+
+
+def control(pointer: Pointer, fallback: f64, low: f64, high: f64) -> f64:
+    if pointer.is_null():
+        return fallback
+    value = f64(abi.read_f32(pointer, 0u64))
+    if not math.isfinite(value):
+        return fallback
+    math.min(high, math.max(low, value))
+
+
+@thread_safe
+export def run(state: Pointer, count: u32) -> () = "compressor_run":
+    left = abi.read_pointer(state, 0u64)
+    right = abi.read_pointer(state, 8u64)
+    output_left = abi.read_pointer(state, 16u64)
+    output_right = abi.read_pointer(state, 24u64)
+    if left.is_null() or right.is_null() or output_left.is_null() or output_right.is_null():
+        return
+    threshold_db = control(abi.read_pointer(state, 32u64), -18.0, -60.0, 0.0)
+    ratio = control(abi.read_pointer(state, 40u64), 4.0, 1.0, 20.0)
+    attack_ms = control(abi.read_pointer(state, 48u64), 10.0, 0.1, 200.0)
+    release_ms = control(abi.read_pointer(state, 56u64), 100.0, 1.0, 2000.0)
+    rate = abi.read_f64(state, abi.RATE)
+    threshold = math.pow(10.0, threshold_db / 20.0).unwrap_or(1.0)
+    attack = math.exp(-1.0 / (0.001 * rate * attack_ms)).unwrap_or(0.0)
+    release = math.exp(-1.0 / (0.001 * rate * release_ms)).unwrap_or(0.0)
+    mut envelope = abi.read_f64(state, abi.ENVELOPE)
+    for index in range(i64(count)):
+        # count is u32, so four times any sample index fits in u64.
+        offset = unchecked:
+            u64(index) * 4u64
+        l_raw = f64(abi.read_f32(left, offset))
+        r_raw = f64(abi.read_f32(right, offset))
+        l = l_raw if math.isfinite(l_raw) else 0.0
+        r = r_raw if math.isfinite(r_raw) else 0.0
+        g = gain(l, r, &mut envelope, threshold, ratio, attack, release)
+        # Both inputs were loaded before either store: exact input/output
+        # aliases and crossed stereo buffers preserve the sample pair.
+        abi.write_f32(output_left, offset, f32(l * g))
+        abi.write_f32(output_right, offset, f32(r * g))
+    abi.write_f64(state, abi.ENVELOPE, envelope)
+
+
+@thread_safe
+export def cleanup(state: Pointer) -> () = "compressor_cleanup":
+    abi.release(state)
+
+
+@thread_safe
+export def initialize_descriptor() -> () = "compressor_initialize_descriptor":
+    "Internal once callback: invoke only through the descriptor's pthread_once control."
+    record = abi.descriptor_storage()
+    abi.write_pointer(record, 0u64, abi.uri())
+    abi.write_pointer(record, 8u64, abi.instantiate_address())
+    abi.write_pointer(record, 16u64, abi.connect_address())
+    abi.write_pointer(record, 24u64, abi.activate_address())
+    abi.write_pointer(record, 32u64, abi.run_address())
+    abi.write_pointer(record, 40u64, Pointer.null())
+    abi.write_pointer(record, 48u64, abi.cleanup_address())
+    abi.write_pointer(record, 56u64, Pointer.null())
+
+
+@thread_safe
+export def descriptor(index: u32) -> Pointer = exact "lv2_descriptor":
+    if index != 0u32:
+        return Pointer.null()
+    if abi.once(abi.once_storage(), abi.initialize_address()) != 0i32:
+        return Pointer.null()
+    abi.descriptor_storage()

@@ -1,31 +1,94 @@
 # Plenty Compressor
 
-An **experimental, not host-ready** stereo LV2 compressor. The peak detector and gain curve are written in Plenty; a small C adapter implements the LV2 ABI, host buffers, and parameter conversion. No third-party libraries are used. The generic host UI supplies four controls: threshold, ratio, attack, and release. There is no custom GUI.
+An experimental stereo LV2 compressor written in Plenty. The plugin descriptor,
+callbacks, instance lifecycle, port connections, parameter conversion and DSP are
+all Plenty code. A trusted `.plentyi` module declares C memory operations and the
+system allocator; no handwritten C adapter is compiled or shipped.
 
-## Important limitations
-
-**Do not install this in a DAW or use it on a real-time audio thread yet.** Plenty 0.8.21's generated `compressor.h` requires *all calls* to the library to be serialized on the same caller thread. LV2 permits multiple plugin instances and hosts may run them on different threads. The adapter does not enforce Plenty's stronger contract, so ordinary hosts can violate it. A mutex alone would not meet the same-thread requirement and would not be appropriate in the audio callback. A usable plugin needs a supported Plenty threading contract compatible with audio hosts, or a different integration design.
-
-Real-time safety has not been established: the Plenty runtime and `std.math.pow` have not been audited for blocking, allocation, worst-case timing, or denormals. A scalar foreign call and power calculation per sample is also likely expensive. The test host exercises only a single thread, not a DAW. The placeholder plugin URI should be replaced with an owned, stable URI before distribution.
+The generic host UI supplies threshold, ratio, attack and release controls.
+There is no custom GUI. Real-time execution has not been audited or certified,
+and the metadata does not advertise `lv2:hardRTCapable`.
 
 ## Build and test
 
-Requires Linux, Plenty 0.8.21, a C compiler, Python 3 (for the smoke test), and [just](https://just.systems/). No LV2 SDK is required; the few core ABI declarations are in `lv2/plugin.c`.
+Requires Linux on a supported 64-bit Plenty target, a compiler built from the
+experimental `codex/c-host-interop` branch, the native linker toolchain, Python 3,
+and [just](https://just.systems/). Released Plenty 0.8.22 does not include these
+interface extensions. No LV2 SDK is required.
 
 ```sh
-just check
-just test
+PLENTY=/tmp/plenty-c-host-interop/target/debug/plenty just check
+PLENTY=/tmp/plenty-c-host-interop/target/debug/plenty just test
 ```
 
-`just build` creates `build/compressor.lv2/` with the adapter, generated Plenty shared library, and LV2 metadata. `just clean` removes build artifacts. The test loads the LV2 descriptor and runs the effect on one thread; it verifies linked-channel gain, the steady-state curve, 1:1 ratio, and silence. It does not certify LV2 compatibility or real-time safety.
+`PLENTY` defaults to `plenty` on PATH. `just build` produces
+`build/compressor.lv2/plugin.so` and LV2 metadata. `just clean` removes build
+artifacts. Tests load the actual descriptor and invoke its callback addresses,
+including concurrent independent instances and ordered thread handoff. They are
+an ABI and signal regression harness, not a DAW compatibility certification.
+
+## Interface design
+
+`src/lib.plenty` implements the plugin. `src/abi.plentyi` is the trusted boundary:
+
+- Opaque pointer exports and exact symbol naming expose `lv2_descriptor`.
+- Static storage holds the descriptor and its URI. Callback pointers refer to
+  generated C calling-convention adapters, not Plenty's internal function ABI.
+- `@thread_safe` exports check reachable Plenty effects. The host serializes
+  access to each instance and synchronizes thread handoff; independent instances
+  may run concurrently.
+- Raw scalar loads and stores permit pointer aliases. They do not construct
+  ordinary shared or exclusive Plenty borrows, and do not validate host memory.
+- `calloc`/`free` own each instance. Port buffers remain owned by the host.
+
+The descriptor is initialized with Linux GNU `pthread_once`, so discovery can
+move between threads and repeat safely. The internal initializer callback must
+only be invoked through that once control. Its address stays stable, and its
+optional deactivate and extension-data callbacks are null. Callback code and
+static data must remain loaded for their entire use; this prototype does not
+qualify runtime library unloading.
+
+C-layout classes and typed function-pointer fields are not implemented by this
+prototype. The trusted module and descriptor construction use explicit offsets
+for the 64-bit C ABI: eight pointer fields in the descriptor, and eight port
+pointers followed by two doubles in each instance. This layout must be reviewed
+before using another target. The raw primitives are an experimental compiler
+interface, not a general safe pointer API.
+
+## Aliasing
+
+Both input samples are read before either output sample is written. Exact
+in-place buffers, crossed stereo buffers and shared input buffers therefore
+work without copies. Controls are read before audio output is written. If the
+two output ports share storage, the right-channel store is last; distinct
+channel results cannot both be represented in one buffer.
+
+Partially overlapping buffers use forward, sample-by-sample memory semantics:
+a write can change a later input sample. They are memory accesses with defined
+ordering, not an out-of-place snapshot of the original input. No hidden copy is
+made. The host must provide valid, aligned storage for every sample and must not
+access it concurrently in conflict with processing.
 
 ## Processing
 
-The maximum absolute level of the two input channels feeds a one-pole envelope follower with separate attack and release time constants. Above threshold, its linear gain is `(envelope / threshold) ** (1 / ratio - 1)`; the same gain is applied to both channels. Parameter changes are sampled once per processing block. There is no makeup gain, knee, lookahead, sidechain, or parameter smoothing. Input NaNs and infinities are replaced with silence; control values are clamped to their declared ranges.
+The maximum absolute level of the input channels feeds a one-pole envelope
+follower with separate attack and release time constants. Above threshold, the
+linear gain is `(envelope / threshold) ** (1 / ratio - 1)`; both channels receive
+the same gain. Parameters are sampled once per block. Input NaNs and infinities
+become silence; nonfinite controls use defaults, and controls are clamped to
+their declared ranges. Invalid sample rates reject instantiation.
+
+There is no makeup gain, knee, lookahead, sidechain, parameter smoothing or
+performance guarantee. Math errors use neutral fallback coefficients/gain.
+The placeholder plugin URI must be replaced with an owned stable URI before
+distribution.
 
 ## References
 
-- [LV2 programming guide](https://lv2plug.in/book/): descriptor, ports, and host lifecycle.
-- [LV2 core threading classes](https://drobilla.net/files/lv2_docs/ns/lv2core.html): instance-level host threading rules.
-- [nice-plug](https://codeberg.org/RustAudio/nice-plug): a higher-level Rust plugin framework; its GUI-less examples informed the initial scope.
-- Plenty's generated `build/compressor.lv2/compressor.h` is the authoritative contract for the compiled library. The local Plenty source documentation is `../plenty/book/src/design/facilities/04-interop/exports.md`.
+- [LV2 core API](https://lv2plug.in/c/html/group__lv2core.html): descriptor,
+  callback signatures, port lifetimes and aliasing.
+- [LV2 threading classes](https://lv2plug.in/ns/lv2core): discovery and
+  instance-level threading contracts.
+- [LV2 programming guide](https://lv2plug.in/book/): lifecycle and metadata.
+- [nice-plug](https://codeberg.org/RustAudio/nice-plug): its GUI-less examples
+  informed the original prototype's scope.
