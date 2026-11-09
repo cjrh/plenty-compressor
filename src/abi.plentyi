@@ -1,0 +1,52 @@
+# Trusted C memory boundary for the Linux 64-bit LV2 core ABI.
+# These pointers never create Plenty loans: host audio ports may alias.
+# The host keeps each buffer alive for run() and serializes each instance.
+@thread_movable
+pub opaque Pointer
+
+@thread_safe
+pub extern def allocate(count: u64, size: u64) -> Pointer = "calloc"
+@thread_safe
+pub extern def release(pointer: Pointer) -> () = "free"
+@thread_safe
+pub extern def read_pointer(pointer: Pointer, offset: u64) -> Pointer = intrinsic "load"
+@thread_safe
+pub extern def write_pointer(pointer: Pointer, offset: u64, value: Pointer) -> () = intrinsic "store"
+@thread_safe
+pub extern def read_f32(pointer: Pointer, offset: u64) -> f32 = intrinsic "load"
+@thread_safe
+pub extern def write_f32(pointer: Pointer, offset: u64, value: f32) -> () = intrinsic "store"
+@thread_safe
+pub extern def read_f64(pointer: Pointer, offset: u64) -> f64 = intrinsic "load"
+@thread_safe
+pub extern def write_f64(pointer: Pointer, offset: u64, value: f64) -> () = intrinsic "store"
+
+@thread_safe
+pub extern def descriptor_storage() -> Pointer = storage 64
+@thread_safe
+pub extern def uri() -> Pointer = static "https://example.org/plenty-compressor"
+@thread_safe
+pub extern def instantiate_address() -> Pointer = address "compressor_instantiate"
+@thread_safe
+pub extern def connect_address() -> Pointer = address "compressor_connect"
+@thread_safe
+pub extern def activate_address() -> Pointer = address "compressor_activate"
+@thread_safe
+pub extern def run_address() -> Pointer = address "compressor_run"
+@thread_safe
+pub extern def cleanup_address() -> Pointer = address "compressor_cleanup"
+
+# Native offsets are isolated here until Plenty supports C-layout records.
+# Eight pointer ports, followed by two doubles; calloc provides alignment.
+pub const INSTANCE_BYTES: u64 = 80u64
+pub const RATE: u64 = 64u64
+pub const ENVELOPE: u64 = 72u64
+
+# Linux GNU pthread_once_t is int with PTHREAD_ONCE_INIT = 0.
+# The callback has C signature void(void) and initializes the table once.
+@thread_safe
+pub extern def once_storage() -> Pointer = storage 4
+@thread_safe
+pub extern def initialize_address() -> Pointer = address "compressor_initialize_descriptor"
+@thread_safe
+pub extern def once(control: Pointer, initialize: Pointer) -> i32 = "pthread_once"
