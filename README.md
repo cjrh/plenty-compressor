@@ -12,16 +12,20 @@ and the metadata does not advertise `lv2:hardRTCapable`.
 ## Build and test
 
 Requires Linux on a supported 64-bit Plenty target, a compiler built from the
-experimental `codex/c-host-interop` branch, the native linker toolchain, Python 3,
+Plenty `main` at `d16e1a68` or later, the native linker toolchain, Python 3,
 and [just](https://just.systems/). Released Plenty 0.8.22 does not include these
 interface extensions. No LV2 SDK is required.
 
 ```sh
-PLENTY=/tmp/plenty-c-host-interop/target/debug/plenty just check
-PLENTY=/tmp/plenty-c-host-interop/target/debug/plenty just test
+# Build Plenty in the sibling checkout first.
+cargo build --locked --manifest-path ../plenty/Cargo.toml --bin plenty
+PLENTY=../plenty/target/debug/plenty just check
+PLENTY=../plenty/target/debug/plenty just test
 ```
 
-`PLENTY` defaults to `plenty` on PATH. `just build` produces
+These paths assume sibling `plenty` and `plenty-compressor` checkouts. Set
+`PLENTY` to the compiler path if your checkouts are elsewhere. `PLENTY` defaults
+to `plenty` on PATH. `just build` produces
 `build/compressor.lv2/plugin.so` and LV2 metadata. `just clean` removes build
 artifacts. Tests load the actual descriptor and invoke its callback addresses,
 including concurrent independent instances and ordered thread handoff. They are
